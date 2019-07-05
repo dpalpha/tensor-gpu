@@ -1,6 +1,7 @@
 # setting cuda on ubuntu 18.4
 
-## install nvidia 418
+#### install nvidia 418
+
 ```bash
 dpkg -l | grep -i nvidia
 sudo apt-get remove --purge '^nvidia-.*'
