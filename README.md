@@ -1,4 +1,5 @@
-# setting cuda on ubuntu 18.4
+# Tensorflow simple pipelines
+
 
 #### install nvidia 418
 
