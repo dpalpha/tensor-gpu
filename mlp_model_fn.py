@@ -1,6 +1,8 @@
 
 def model_fit(features, params, mode):
     
+    """ multilayer perceptron (MLP)  """
+    
     config = params
     
     input_layer = tf.reshape(features["x"], [-1, features["x"].shape[1] ] )
