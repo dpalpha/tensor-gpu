@@ -2,7 +2,8 @@ import tensorflow as tf
 
 def cnn_model_fn(features, params, mode):  
   
-"""Model function for CNN."""  
+""" Convolutional Neural Networks (CNNs) 
+"""  
   config = params
   
   # Input Layer  
