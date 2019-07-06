@@ -15,6 +15,9 @@ sudo apt autoclean
 sudo add-apt-repository ppa:graphics-drivers/ppa
 sudo apt update
 sudo apt install nvidia-driver-418 nvidia-settings
+
+apt install python3-dev
+
 ```
 
 ### install CUDA Toolkit 10.1 
