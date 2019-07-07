@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Jul  7 17:23:06 2019
+
+@author: root
+"""
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import make_scorer
+from sklearn.preprocessing import Imputer
+import tensorflow as tf
+import json, gc, os
+
+
+from tensorflow.python.client import device_lib
+
+tf.logging.set_verbosity(tf.logging.INFO)
+device_lib.list_local_devices()
+
+# mlp classifier settings 
+#------------------------------------------------------------------------------------------------------
+
+flags = tf.app.flags
+flags.DEFINE_integer('nclasses', 2, 'Number of outputs')
+flags.DEFINE_integer('num_epochs', 200, 'Number of training epochs')
+flags.DEFINE_integer('lstm_size', 3, ' ')
+flags.DEFINE_integer('batch_size', 64, 'Batch size')
+flags.DEFINE_float('learning_rate', 0.01, 'Learning rate')
+flags.DEFINE_float('dropout_rate', 0.5, 'Dropout rate')
+flags.DEFINE_float('n_hidden1', 126, 'Number of hiden layer 1')
+flags.DEFINE_float('n_hidden2', 64, 'Number of hiden layer 2')
+flags.DEFINE_float('n_hidden3', 32, 'Number of hiden layer 3')
+flags.DEFINE_integer('num_steps', int(500000/flags.FLAGS.batch_size), 'n staps')
+flags.DEFINE_string('train_dataset', 'train.tfrecords','Filename of training dataset')
+flags.DEFINE_string('eval_dataset', 'eval.tfrecords','Filename of evaluation dataset')
+flags.DEFINE_string('test_dataset', 'test.tfrecords', 'Filename of testing dataset')
+flags.DEFINE_string('model_dir', 'model7/', 'Directory to save models')
+flags.DEFINE_string('output_dir', 'model7/', 'Directory to save models')
+flags.DEFINE_integer('num_gpus', 0, 'Directory to save models')
+
+
+FLAGS = flags.FLAGS
+
+# mlp devices settings 
+#------------------------------------------------------------------------------------------------------
+
+settings = tf.estimator.\
+                           RunConfig(keep_checkpoint_max=2, 
+                                     save_checkpoints_steps=FLAGS.num_steps, 
+                                     save_checkpoints_secs=None).\
+                           replace(
+                                      session_config=tf.ConfigProto(log_device_placement=True,
+                                      device_count={'GPU': FLAGS.num_gpus}))
+
+# mlp validation settings 
+#------------------------------------------------------------------------------------------------------
+
+class ValidationHook(tf.train.SessionRunHook):
+    
+    def __init__(self, parent_estimator, input_fn,
+                 every_n_secs=None, every_n_steps=None):
+        print("ValidationHook was initialized")
+        self._parent_estimator = parent_estimator
+        self._estimator = tf.contrib.estimator.add_metrics(parent_estimator,self.evaluation_metrics)
+        self._input_fn = input_fn
+        self._iter_count = 0
+        self._timer = tf.train.SecondOrStepTimer(every_n_secs, every_n_steps)
+        self._should_trigger = False
+
+    @staticmethod 
+    # This is the function that meets the specs of metric_fn
+    def evaluation_metrics(labels, predictions):
+        probabilities = predictions['probabilities']
+        return {'auc': tf.metrics.auc(labels, probabilities)}
+    
+    def begin(self):
+        self._timer.reset()
+        self._iter_count = 0
+
+    def before_run(self, run_context):
+        self._should_trigger = self._timer.should_trigger_for_step(self._iter_count)
+
+    def after_run(self, run_context, run_values):
+        if self._should_trigger:
+            print("Hook is running")
+            validation_eval_accuracy = self._estimator.evaluate(input_fn=self._input_fn)
+#             validation_eval_accuracy = self._parent_estimator.evaluate(input_fn=self._input_fn)
+            print("Hook is done running. Training set accuracy: {accuracy}".format(**validation_eval_accuracy))
+            self._timer.update_last_triggered_step(self._iter_count)
+        self._iter_count += 1
+        
+
+def mlp_model_fn(features, mode):
+
+            
+    input_layer = tf.reshape(features["x"], [-1, features["x"].shape[1] ] )
+    print ('feature x shape', features["x"].shape)
+    print ('reshape shape:', input_layer.shape)
+        
+    # Dense Layers
+    #-------------------------------------------------------------
+    hidden1 = tf.layers.dense(inputs=features["x"], units=FLAGS.n_hidden1, activation=tf.nn.relu)
+    
+    bn1 = tf.layers.batch_normalization(hidden1, momentum = 0.9)
+    
+    drop_h1 = tf.layers.dropout(inputs=bn1, rate=0.5, training=mode == tf.estimator.ModeKeys.TRAIN)
+    
+    hidden2 = tf.layers.dense(inputs=drop_h1, units=FLAGS.n_hidden2, activation=tf.nn.relu) 
+    
+    drop_h2 = tf.layers.dropout(inputs=hidden2, rate=0.5, training=mode == tf.estimator.ModeKeys.TRAIN)
+    
+    hidden3 = tf.layers.dense(inputs=drop_h2, units=FLAGS.n_hidden3, activation=tf.nn.relu)
+    
+    drop_h3 = tf.layers.dropout(inputs=hidden3, rate=0.6, training=mode == tf.estimator.ModeKeys.TRAIN)
+    
+    logits = tf.layers.dense(inputs=drop_h3, units=FLAGS.nclasses, activation=tf.nn.sigmoid)
+    
+    return logits
+
+
+class simpleEstimator(object):
+    
+    def __init__(self, X_train, y_train, X_test, X_val, y_val, mode, config):
+        self.X_train=X_train
+        self.y_train=y_train
+        self.X_test=X_test
+        self.X_val=X_val
+        self.y_val=y_val
+        self.config=config
+    
+    @staticmethod
+    def model_tffn(features, labels, mode, params):
+        
+        """Model function for MLP."""
+    
+        config = params
+    
+        # Input Layer
+        
+        logits = mlp_model_fn(features,params, mode)
+        predictions = {
+            # Generate predictions (for PREDICT and EVAL mode)
+            "classes": tf.argmax(input=logits, axis=1),
+            # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
+            # `logging_hook`.
+            "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
+        }
+    
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+        onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=config['nclasses'])
+        loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logits)
+    
+        # Configure the Training Op (for TRAIN mode)
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            #optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+            #optimizer = tf.train.RMSPropOptimizer(learning_rate=FLAGS.learning_rate)
+            optimizer = tf.train.GradientDescentOptimizer(learning_rate=config['learning_rate'])
+            train_op = optimizer.minimize(loss=loss,global_step=tf.train.get_global_step(), name="minimieze")
+            
+            return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+    
+        # Add evaluation metrics (for EVAL mode)
+        eval_metric_ops = {
+          "accuracy": tf.metrics.accuracy(
+              labels=labels, predictions=predictions["classes"])}
+        
+        
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
+
+    def train_eval(self):
+        
+        # Create the Estimator
+        self.mlp_classifier = tf.estimator.Estimator(
+        model_fn=self.model_tffn, model_dir=FLAGS.model_dir,
+            params=settings)
+
+        # Set up logging for predictions
+        tensors_to_log = {"probabilities": "softmax_tensor"}
+        logging_hook = tf.train.LoggingTensorHook(
+          tensors=tensors_to_log, every_n_iter=100)
+
+        summary_hook = tf.train.SummarySaverHook(
+            save_steps=100,
+            output_dir=FLAGS.output_dir,
+            scaffold=tf.train.Scaffold(),
+            summary_op=tf.summary.merge_all())
+
+
+        # Train the model
+        #----------------------------------------------------------
+        train_input_fn = tf.estimator.\
+        inputs.numpy_input_fn(
+          x={"x": self.X_train},
+          y=self.y_train,
+          batch_size=FLAGS.batch_size,
+          num_epochs=FLAGS.num_epochs,
+          num_threads=1,
+          shuffle=True,
+        )
+
+        # Evaluate the model and print results
+        #----------------------------------------------------------
+        eval_input_fn = tf.estimator.\
+        inputs.numpy_input_fn(
+        x={"x": self.X_val},
+        y=self.y_val,
+        num_epochs=1,
+        shuffle=False)
+
+        # run train
+        self.mlp_classifier.\
+        train(
+          input_fn=train_input_fn,
+          steps=FLAGS.num_steps*FLAGS.num_epochs,
+          hooks=[logging_hook])
+
+        
+        #hooks=[ValidationHook(estimator, validation_input_fn, None, STEPS_PER_EPOCH)]
+        
+        eval_results = self.mlp_classifier.evaluate(input_fn=eval_input_fn)
+        print(eval_results)
+
+        predictions_eval = list(self.mlp_classifier.predict(input_fn=eval_input_fn))
+        predictions_eval = list(map(lambda x: list(x)[1], [p["probabilities"] for p in predictions_eval]))
+        
+        self.save_hp_to_json()
+
+    def return_result(self):
+        
+        # Predict the model
+        #----------------------------------------------------------
+        test_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": self.X_test.values},
+        num_epochs=1,
+        shuffle=False)
+        
+        predictions = list(self.mlp_classifier.predict(input_fn=test_input_fn))
+        proba = list(map(lambda x: list(x)[1], [p["probabilities"] for p in predictions]))
+        return proba
+        self.save_hp_to_json()
+    
+    @staticmethod
+    def save_hp_to_json():
+        '''Save hyperparameters to a json file'''
+        filename = os.path.join(FLAGS.model_dir, 'hparams.json')
+        hparams = FLAGS.flag_values_dict()
+        with open(filename, 'w') as f:
+            json.dump(hparams, f, indent=4, sort_keys=True)
+            
+        tf.logging.info('Saving hyperparameters ...')
+    
+    
+        
+        
