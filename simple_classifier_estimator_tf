@@ -47,13 +47,16 @@ FLAGS = flags.FLAGS
 # mlp devices settings 
 #------------------------------------------------------------------------------------------------------
 
+strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
+
 settings = tf.estimator.\
                            RunConfig(keep_checkpoint_max=2, 
-                                     save_checkpoints_steps=FLAGS.num_steps, 
-                                     save_checkpoints_secs=None).\
+                                     save_checkpoints_steps=config['NUM_STEPS'], 
+                                     save_checkpoints_secs=None,
+                                     train_distribute=strategy).\
                            replace(
                                       session_config=tf.ConfigProto(log_device_placement=True,
-                                      device_count={'GPU': FLAGS.num_gpus}))
+                                      device_count={'GPU': 1}))
 
 # mlp validation settings 
 #------------------------------------------------------------------------------------------------------
