@@ -6,11 +6,7 @@ Created on Sun Jul  7 17:23:06 2019
 @author: root
 """
 
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import make_scorer
-from sklearn.preprocessing import Imputer
+
 import tensorflow as tf
 import json, gc, os
 
@@ -98,7 +94,6 @@ class ValidationHook(tf.train.SessionRunHook):
 
 def mlp_model_fn(features, mode):
 
-            
     input_layer = tf.reshape(features["x"], [-1, features["x"].shape[1] ] )
     print ('feature x shape', features["x"].shape)
     print ('reshape shape:', input_layer.shape)

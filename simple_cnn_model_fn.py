@@ -4,8 +4,7 @@ def cnn_model_fn(features, params, mode):
   
 """ Convolutional Neural Networks (CNNs) 
 """  
-  config = params
-  
+
   # Input Layer  
   
   input_layer = tf.reshape(tf.cast(features["x"], tf.float32), [-1, 154, 100, 2])

@@ -1,4 +1,6 @@
-def cifar_model_fn(features, labels, mode):
+import tensorflow as tf
+
+def cifar_model_fn(features, mode):
     """Model function for cifar10"""
     # Input layer
     x = tf.reshape(features, [-1, 32, 32, 3])
@@ -44,5 +46,6 @@ def cifar_model_fn(features, labels, mode):
                              kernel_regularizer=regularizer, name='DENSE2')
     x = tf.layers.dropout(inputs=x, rate=FLAGS.dropout_rate,
                                 training=mode == tf.estimator.ModeKeys.TRAIN, name='DROPOUT')
+
     logits = tf.layers.dense(inputs=x, units=10,
                              kernel_regularizer=regularizer, name='FINAL')

@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 
 def model_fit(features, params, mode):
     
