@@ -1,15 +1,15 @@
-import numpy as np
+
 from sklearn.model_selection import train_test_split
-import tensorflow as tf
+import numpy as np
 from matplotlib import pyplot as plt
+
+import tensorflow as tf
+
 from tensorflow.python.platform import tf_logging as logging
 
 logging.set_verbosity(logging.INFO)
 logging.log(logging.INFO, "Tensorflow version " + tf.__version__)
 
-
-# GENERATE EXAMPLES TIMESERIES
-#------------------------------------------------------------------
 
 def generate_time_series(datalen):
     freq1 = 0.2
@@ -31,14 +31,18 @@ BATCHSIZE = 32
 X = data
 Y = np.roll(data, -1)
 
-Y = Y > 0
+Y = Y>0
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, Y.astype(int),
                                                     test_size=.2,
                                                     random_state=0)
 
-# preparing window seqwentions
-#--------------------------------------------------------------------------------------------
+X_train = np.reshape(X_train, [-1, SEQLEN])
+Y_train = np.reshape(Y_train, [-1, SEQLEN])
+
+X_test = np.reshape(X_test, [-1, SEQLEN])
+Y_test = np.reshape(Y_test, [-1, SEQLEN])
+
 
 def train_dataset():
     dataset = tf.data.Dataset.from_tensor_slices((X_train, Y_train))
@@ -57,23 +61,18 @@ def eval_dataset():
     samples, labels = evaldataset.make_one_shot_iterator().get_next()
     return samples, labels
 
-X_train = np.reshape(X_train, [-1, SEQLEN])
-Y_train = np.reshape(Y_train, [-1, SEQLEN])
-
-X_test = np.reshape(X_test, [-1, SEQLEN])
-Y_test = np.reshape(Y_test, [-1, SEQLEN])
-
 
 RNN_CELLSIZE = 80
-N_LAYERS = 2
-DROPOUT_PKEEP = 0.7
 
-def lstm_rnn__model_fn(features, labels, mode):
+N_LAYERS = 3
+
+DROPOUT_PKEEP = 0.88
+
+def model_rnn_fn(features, labels, mode):
 
     X = tf.expand_dims(features, axis=2)
 
     batchsize = tf.shape(X)[0]
-
     seqlen = tf.shape(X)[1]
 
     cells = [tf.nn.rnn_cell.GRUCell(RNN_CELLSIZE) for _ in range(N_LAYERS)]
@@ -89,10 +88,8 @@ def lstm_rnn__model_fn(features, labels, mode):
     Yn = tf.reshape(Yn, [batchsize * seqlen, RNN_CELLSIZE])
     logit = tf.layers.dense(Yn, units=2, activation=tf.nn.sigmoid)  # logit [BATCHSIZE*SEQLEN, 1]
     logit = tf.reshape(logit, [batchsize, seqlen, 2])  # logit [BATCHSIZE, SEQLEN, 1]
-    return logit
 
-def fit_etimator(features, labels, mode):
-    logit = lstm_rnn__model_fn(features, labels,mode)
+
     predictions = {
         # Generate predictions (for PREDICT and EVAL mode)
         "classes": tf.argmax(input=logit, axis=1),
@@ -101,38 +98,43 @@ def fit_etimator(features, labels, mode):
         "probabilities": tf.nn.softmax(logit, name="softmax_tensor")
     }
 
-
     loss = train_op = None
-
     if mode != tf.estimator.ModeKeys.PREDICT:
-
         onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=2)
-
         loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logit)
-
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
+        lr = 0.001
+        optimizer = tf.train.AdamOptimizer(learning_rate=lr)
 
         train_op = tf.contrib.training.create_train_op(loss, optimizer)
 
-
     return tf.estimator.EstimatorSpec(
         mode=mode,
-        loss=loss,
         predictions=predictions,
+        loss=loss,
         train_op=train_op
     )
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
 
     training_config = tf.estimator.RunConfig()
 
-    estimator = tf.estimator.Estimator(model_fn=fit_etimator, config=training_config)
+    estimator = tf.estimator.Estimator(model_fn=model_rnn_fn, config=training_config)
 
     estimator.train(input_fn=train_dataset,steps=2000)
 
     results = estimator.predict(eval_dataset)
 
     predict = [result["probabilities"] for result in results]
+    predict = list(map(lambda x : x[0], np.array(predict)[:,-1]))
 
     actual = Y_test[:, -1]
 
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    plt.rcParams['figure.figsize'] = 15, 7
+
+    plt.plot(actual, label="Actual Values", color='green')
+    plt.plot(list(map(lambda x: 1 if x> 0.5 else 0, predict)),
+             label="Predicted Values", color='red', )
+
+    plt.show()
