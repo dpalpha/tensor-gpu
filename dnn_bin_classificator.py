@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn import model_selection
-
+from sklearn.metrics import roc_curve, auc, roc_auc_score
+    
 x_train, x_val, y_tr, y_val =  model_selection.train_test_split(X_train, y_train,test_size=.5, random_state=1200)
 
 tf.set_random_seed(47)
@@ -50,18 +51,37 @@ nn_model = tf.estimator.add_metrics(nn_model, metric_auc)
 
 input_func = tf.estimator.inputs.pandas_input_fn(x=x_train,y=y_tr,batch_size=100, num_epochs=1000, shuffle=True)
 
-for i in range(0,100):
-    nn_model.train(input_fn= input_func, steps=100)
-
 eval_input_func = tf.estimator.inputs.pandas_input_fn(x=x_val,y=y_val,batch_size=100,num_epochs=1, shuffle=False)
 
-nn_model.evaluate(eval_input_func)
+validation_log_losses = []
 
-predict_input_func = tf.estimator.inputs.pandas_input_fn(x=x_val,batch_size=100,num_epochs=1,shuffle=False)
+for i in range(0,100):
+    
+    nn_model.train(input_fn= input_func, steps=100)
 
-predictions = nn_model.predict(input_fn=predict_input_func)
+    nn_model.evaluate(eval_input_func)
 
-prediction=[i['probabilities'][1] for i in predictions]
+    predict_input_func = tf.estimator.inputs.pandas_input_fn(x=x_val,batch_size=100,num_epochs=1,shuffle=False)
 
-from sklearn.metrics import roc_curve, auc, roc_auc_score
-print("auc scores oos: %s "% roc_auc_score(y_val,prediction))
+    predictions = nn_model.predict(input_fn=predict_input_func)
+
+    prediction=[i['probabilities'][1] for i in predictions]
+    
+    validation_log_loss = metrics.log_loss(y_val, prediction)
+    
+    print("moment %02d : %0.2f" % (i, training_log_loss))
+    
+    validation_log_losses.append(validation_log_loss)
+      print("Model training finished.")
+
+    print("auc scores oos: %s "% roc_auc_score(y_val,prediction))
+
+  # Output a graph of loss metrics over periods.
+  plt.ylabel("LogLoss")
+  plt.xlabel("Periods")
+  plt.title("LogLoss vs. Periods")
+  plt.tight_layout()
+  plt.plot(validation_log_losses, label="validation")
+  plt.legend()
+
+
