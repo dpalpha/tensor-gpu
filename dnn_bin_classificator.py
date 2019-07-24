@@ -15,30 +15,93 @@ def sm_to_sparse_tensor(X):
     indices = np.mat([coo.row, coo.col]).transpose()
     return tf.SparseTensorValue(indices, coo.data, coo.shape)
 
-
-feat_cols= []
-for col in x_train.columns:
-    feat_cols.append(tf.feature_column.numeric_column(col))
-
 x_train = x_train.apply(lambda x: (x-x.mean())/x.std())
 x_val = x_val.apply(lambda x: (x-x.mean())/x.std())
 
-my_head = tf.contrib.estimator.binary_classification_head()
+import numpy as np
+import pandas as pd
+from sklearn import model_selection
+from sklearn.metrics import roc_curve, auc, roc_auc_score, log_loss
 
-nn_model = tf.estimator.DNNClassifier(
-    hidden_units=[336,168,84,42],
-    feature_columns=feat_cols,
+import tensorflow as tf
+from tensorflow.python.client import device_lib
+print("GPU Available: ", tf.test.is_gpu_available())
+print(list(map(lambda x: x.name ,device_lib.list_local_devices())))
+
+
+
+# tf.set_random_seed(47)
+# tf.reset_default_graph()
+
+x_train, x_val, y_tr, y_val =  model_selection.train_test_split(X_train, y_train,
+                                                                test_size=.8, random_state=1200)
+
+def train_input_fn(features, labels, batch_size):
+    """An input function for training"""
+
+    dataset = tf.data.Dataset.from_tensor_slices((dict(features), labels))
+    dataset = dataset.shuffle(10).repeat().batch(batch_size)
+    return dataset
+
+def eval_input_fn(features, labels, batch_size):
+    """An input function for evaluation or prediction"""
+    features=dict(features)
+    if labels is None:
+        inputs = features
+    else:
+        inputs = (features, labels)
+
+    dataset = tf.data.Dataset.from_tensor_slices(inputs)
+    
+    assert batch_size is not None, "batch_size must not be None"
+    dataset = dataset.batch(batch_size)
+
+    return dataset
+
+feature_columns = []
+
+for key in x_train.keys():
+    feature_columns.append(tf.feature_column.numeric_column(key=key))
+
+# strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
+# strategy = tf.distribute.MirroredStrategy(devices=["/CPU:0"])
+
+# settings = tf.estimator.\
+#                            RunConfig(keep_checkpoint_max=None, 
+#                                      save_checkpoints_steps=None, 
+#                                      save_checkpoints_secs=None,
+#                                      train_distribute=strategy
+#                                     ).\
+#                            replace(
+#                                       session_config=tf.ConfigProto(log_device_placement=True,
+#                                                                     allow_soft_placement=True,
+#                                                                     device_count={'GPU': 1, 'CPU': 1},
+#                                                                     inter_op_parallelism_threads=1,
+#                                                                     intra_op_parallelism_threads=8
+#                                                                    )
+# )
+
+    
+classifier = tf.estimator.DNNClassifier(
+    
+    feature_columns=feature_columns,
+    
+    hidden_units=[320, 128, 16],
+    
     activation_fn=tf.nn.relu,
-    optimizer=tf.train.ProximalAdagradOptimizer(
-        learning_rate=0.01,
-        l1_regularization_strength=0.01
-    ),
+    
+    dropout=0.03,
+    
+#     optimizer=tf.train.ProximalAdagradOptimizer(
+#         learning_rate=0.05,
+#         l1_regularization_strength=0.01
+#     ),
     n_classes=2,
-    batch_norm = True
-    #                                        optimizer=tf.train.AdagradOptimizer(learning_rate=0.06),
-    #model_dir="/tmp/kaggle_fraud",
-    #config=chk_point_run_config,
+    batch_norm = False,
+    #model_dir="/kag_fraud_sys
+
 )
+
 def metric_auc(labels, predictions):
     return {
         'auc_precision_recall': tf.metrics.auc(
@@ -47,41 +110,17 @@ def metric_auc(labels, predictions):
             curve='PR', summation_method='careful_interpolation')
     }
 
-nn_model = tf.estimator.add_metrics(nn_model, metric_auc)
+classifier = tf.estimator.add_metrics(classifier, metric_auc)
 
-input_func = tf.estimator.inputs.pandas_input_fn(x=x_train,y=y_tr,batch_size=100, num_epochs=1000, shuffle=True)
-
-eval_input_func = tf.estimator.inputs.pandas_input_fn(x=x_val,y=y_val,batch_size=100,num_epochs=1, shuffle=False)
-
-validation_log_losses = []
+batch_size = 100
+train_steps = 400
 
 for i in range(0,100):
-    
-    nn_model.train(input_fn= input_func, steps=100)
-
-    nn_model.evaluate(eval_input_func)
-
-    predict_input_func = tf.estimator.inputs.pandas_input_fn(x=x_val,batch_size=100,num_epochs=1,shuffle=False)
-
-    predictions = nn_model.predict(input_fn=predict_input_func)
-
+    classifier.train(input_fn=lambda:train_input_fn(x_train, y_tr,batch_size),steps=train_steps)
+    eval_result = classifier.evaluate(input_fn=lambda:eval_input_fn(x_val, y_val,batch_size))
+    predictions = classifier.predict(input_fn=lambda:eval_input_fn(x_val,labels=None,batch_size=batch_size))
     prediction=[i['probabilities'][1] for i in predictions]
-    
-    validation_log_loss = metrics.log_loss(y_val, prediction)
-    
-    print("moment %02d : %0.2f" % (i, training_log_loss))
-    
-    validation_log_losses.append(validation_log_loss)
-      print("Model training finished.")
+    print("auc scores oos: %s "%(roc_auc_score(y_val,prediction)))
 
-    print("auc scores oos: %s "% roc_auc_score(y_val,prediction))
-
-  # Output a graph of loss metrics over periods.
-  plt.ylabel("LogLoss")
-  plt.xlabel("Periods")
-  plt.title("LogLoss vs. Periods")
-  plt.tight_layout()
-  plt.plot(validation_log_losses, label="validation")
-  plt.legend()
-
-
+predictions = classifier.predict(input_fn=lambda:eval_input_fn(X_test,labels=None,batch_size=batch_size))
+prediction=[i['probabilities'][1] for i in prediction
