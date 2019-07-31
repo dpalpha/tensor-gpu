@@ -1,0 +1,36 @@
+# holdout trainset
+X_train, X_test = np.split(train.iloc[range(0, train.shape[0])], [200000]) # hold train values
+y_train, y_test = np.split(target.iloc[range(0, len(target))], [200000]) # hold test values
+
+# test model 
+from sklearn import model_selection
+import lightgbm as lgb
+from lightgbm import LGBMClassifier
+from sklearn.metrics import roc_auc_score, roc_curve, log_loss
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import KFold, StratifiedKFold
+
+import matplotlib.pyplot as plt
+# %maplotlib inline
+
+nam_features = {}
+
+class MyPipe(Pipeline):
+    def fit(self, X, y=None, **fit_params):
+        super(MyPipe, self).fit(X, y, **fit_params)
+        #self.estimator = self.steps[-1][-1]
+        return self
+
+clf = model_selection.GridSearchCV(
+    MyPipe([('ligb', 
+             LGBMClassifier(n_estimators=2000,max_depth=36,learning_rate=0.024,
+                                    subsample=0.8,colsample_bytree=0.9),
+                           )]), 
+    cv=KFold(5), param_grid={}).fit(X_train[nam_features], y_train)
+
+pred_train = clf.predict_proba(X_train[nam_features])[:, 1]
+pred_val = clf.predict_proba(X_test[nam_features])[:, 1]
+print("auc val: ", roc_auc_score(y_train, pred_train))
+print("auc val: ", roc_auc_score(y_test, pred_val))
+# lgb.plot_metric(clf, metric='auc')
+# plt.show()
